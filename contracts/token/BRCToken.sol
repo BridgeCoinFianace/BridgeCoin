@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity >=0.7.0;
+pragma solidity 0.7.6;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -11,6 +11,7 @@ contract BRCToken is ERC20, Ownable {
     using SafeMath for uint256;
 
     uint256 public constant BASE_RATIO = 10**18;
+    uint256 public constant MAX_SALE_FEE = (3 * BASE_RATIO) / 100;
     uint256 public immutable MAX_BURN_AMOUNT;
     mapping(address => bool) private minner;
     mapping(address => bool) public pairs;
@@ -22,7 +23,10 @@ contract BRCToken is ERC20, Ownable {
 
     event NewBurnFeePercent(uint256 oldFee, uint256 newFee);
     event NewTeamFeePercent(uint256 oldFee, uint256 newFee);
-
+    event AddPair(address pair);
+    event DelPair(address pair);
+    event AddWhitelist(address account);
+    event DelWhitelist(address account);
     constructor(
         string memory _name,
         string memory _symbol,
@@ -34,11 +38,14 @@ contract BRCToken is ERC20, Ownable {
         remaining = _maxSupply;
         vault = _vault;
         MAX_BURN_AMOUNT = remaining.sub(20000000000 * (10**_decimals));
-
         burnFeePercentOnSale = BASE_RATIO.mul(15).div(1000);
         emit NewBurnFeePercent(0, BASE_RATIO.mul(15).div(1000));
         teamFeePercentOnSale = BASE_RATIO.mul(15).div(1000);
         emit NewTeamFeePercent(0, BASE_RATIO.mul(15).div(1000));
+        require(
+            MAX_SALE_FEE >= burnFeePercentOnSale.add(teamFeePercentOnSale),
+            "fee overflow"
+        );
     }
 
     function setMinner(address _minner, bool enable) external onlyOwner {
@@ -59,11 +66,19 @@ contract BRCToken is ERC20, Ownable {
     }
 
     function setBurnFeePercentOnSale(uint256 percent) external onlyOwner {
+        require(
+            MAX_SALE_FEE >= teamFeePercentOnSale.add(percent),
+            "fee overflow"
+        );
         emit NewBurnFeePercent(burnFeePercentOnSale, percent);
         burnFeePercentOnSale = percent;
     }
 
     function setTeamFeePercentOnSale(uint256 percent) external onlyOwner {
+        require(
+            MAX_SALE_FEE >= burnFeePercentOnSale.add(percent),
+            "fee overflow"
+        );
         emit NewTeamFeePercent(teamFeePercentOnSale, percent);
         teamFeePercentOnSale = percent;
     }
@@ -98,22 +113,27 @@ contract BRCToken is ERC20, Ownable {
     {
         address pair = expectPair(_factory, address(this), _token);
         pairs[pair] = true;
+        emit AddPair(pair);
     }
 
     function addPair(address _pair) external onlyOwner {
         pairs[_pair] = true;
+        emit AddPair(_pair);
     }
 
     function delPair(address _pair) external onlyOwner {
         delete pairs[_pair];
+        emit DelPair(_pair);
     }
 
     function addWhitelist(address _addr) external onlyOwner {
         whitelist[_addr] = true;
+        emit AddWhitelist(_addr);
     }
 
     function delWhitelist(address _addr) external onlyOwner {
         delete whitelist[_addr];
+        emit DelWhitelist(_addr);
     }
 
     function mint(address to, uint256 value) external onlyMinner {
@@ -128,19 +148,15 @@ contract BRCToken is ERC20, Ownable {
         uint256 amount
     ) internal virtual override {
         if (pairs[to] && !whitelist[from] && !whitelist[to]) {
-            amount = calculateFee(from, to, amount);
+            amount = calculateFee(from, amount);
         }
         super._transfer(from, to, amount);
     }
 
     function calculateFee(
         address from,
-        address to,
         uint256 amount
     ) internal returns (uint256) {
-        if (whitelist[from] || whitelist[to]) {
-            return amount;
-        }
         uint256 burnFee = amount.mul(burnFeePercentOnSale).div(BASE_RATIO);
         if (balanceOf(address(0xdead)).add(burnFee) >= MAX_BURN_AMOUNT) {
             if (balanceOf(address(0xdead)) < MAX_BURN_AMOUNT) {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity >=0.7.0;
+pragma solidity 0.7.6;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -13,17 +13,18 @@ contract ICOTool is Ownable {
     using SafeERC20 for IERC20;
     uint256 public constant BASE_RATIO = 10**18;
     uint256 public remaining;
-    IERC20 public currency;
-    IERC20 public icoToken;
-    uint256 public price;
-    uint256 public icoLimitPerUser;
-    address public vault;
-    uint256 public startTime;
-    uint256 public endTime;
+    IERC20 immutable public currency;
+    IERC20 immutable public icoToken;
+    uint256 immutable public price;
+    uint256 immutable public icoLimitPerUser;
+    address immutable public vault;
+    uint256 immutable public startTime;
+    uint256 immutable public endTime;
     mapping(address => UserInfo) public userInfos;
 
     struct UserInfo {
         uint256 amount;
+        uint256 alreadyAmount;
         uint8 collectState;
     }
 
@@ -80,6 +81,7 @@ contract ICOTool is Ownable {
             user.collectState = 1;
         }
         icoToken.safeTransfer(msg.sender, amount);
+        user.alreadyAmount = user.alreadyAmount.add(amount);
 
         emit Collect(msg.sender, amount);
     }
@@ -87,6 +89,7 @@ contract ICOTool is Ownable {
     function harvest(address account) public view returns (uint256) {
         UserInfo memory user = userInfos[account];
         uint256 amount;
+        if (endTime > block.timestamp) return 0;
         if (block.timestamp.sub(endTime) > 60 days) {
             if (user.collectState == 0) {
                 amount = user.amount;
@@ -107,5 +110,11 @@ contract ICOTool is Ownable {
             }
         }
         return amount;
+    }
+
+    function locking(address account) public view returns(uint256) {
+        uint256 amount = userInfos[account].amount;
+        uint256 alreadys = userInfos[account].alreadyAmount;
+        return amount <= 0 ? 0 : amount.sub(alreadys).sub(harvest(account));
     }
 }
